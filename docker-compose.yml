@@ -1,0 +1,100 @@
+version: "3"
+
+services:
+  traefik:
+    isolation: hyperv
+    image: ${TRAEFIK_IMAGE}
+    command:
+      - "--ping"
+      - "--api.insecure=true"
+      - "--providers.docker.endpoint=npipe:////./pipe/docker_engine"
+      - "--providers.docker.exposedByDefault=false"
+      - "--providers.file.directory=C:/etc/traefik/config/dynamic"
+      - "--entryPoints.websecure.address=:443"
+      - "--accesslog=true"
+    ports:
+      - "443:443"
+      - "8079:8080"
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+    volumes:
+      - source: \\.\pipe\docker_engine
+        target: \\.\pipe\docker_engine
+        type: npipe
+      - ./data/traefik:C:/etc/traefik
+    networks:
+      - headstart
+
+  buyer:
+    image: ${REGISTRY}headstart-buyer:latest
+    isolation: ${ISOLATION}
+    ports:
+      - 4300:80
+    build:
+      context: .
+      dockerfile: docker/build/UI/Dockerfile
+      args:
+        BASE_IMAGE: mcr.microsoft.com/dotnet/sdk:3.1-nanoserver-${NANOSERVER_VERSION}
+        NODE_VERSION: ${NODE_VERSION}
+        ROLE: Buyer
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.middlewares.force-STS-Header.headers.forceSTSHeader=true"
+      - "traefik.http.middlewares.force-STS-Header.headers.stsSeconds=31536000"
+      - "traefik.http.routers.buyer-secure.entrypoints=websecure"
+      - "traefik.http.routers.buyer-secure.rule=Host(`${BUYER_HOST}`)"
+      - "traefik.http.routers.buyer-secure.tls=true"
+      - "traefik.http.routers.buyer-secure.middlewares=force-STS-Header"
+    networks:
+      headstart:
+        aliases:
+         - "${BUYER_HOST}"
+
+  seller:
+    image: ${REGISTRY}headstart-seller:latest
+    isolation: ${ISOLATION}
+    build:
+      context: .
+      dockerfile: docker/build/UI/Dockerfile
+      args:
+        BASE_IMAGE: mcr.microsoft.com/dotnet/sdk:3.1-nanoserver-${NANOSERVER_VERSION}
+        NODE_VERSION: ${NODE_VERSION}
+        ROLE: Seller
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.middlewares.force-STS-Header.headers.forceSTSHeader=true"
+      - "traefik.http.middlewares.force-STS-Header.headers.stsSeconds=31536000"
+      - "traefik.http.routers.seller-secure.entrypoints=websecure"
+      - "traefik.http.routers.seller-secure.rule=Host(`${SELLER_HOST}`)"
+      - "traefik.http.routers.seller-secure.tls=true"
+      - "traefik.http.routers.seller-secure.middlewares=force-STS-Header"
+    networks:
+      headstart:
+        aliases:
+          - "${SELLER_HOST}"
+
+  middleware:
+    image: ${REGISTRY}headstart-middleware:latest
+    isolation: ${ISOLATION}
+    build:
+      context: .
+      dockerfile: docker/build/middleware/Dockerfile
+      args:
+        BASE_IMAGE: mcr.microsoft.com/dotnet/sdk:3.1-nanoserver-${NANOSERVER_VERSION}
+        BUILD_IMAGE: mcr.microsoft.com/dotnet/sdk:3.1-nanoserver-${NANOSERVER_VERSION}
+    networks:
+      headstart:
+        aliases:
+          - "${API_HOST}"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.middlewares.force-STS-Header.headers.forceSTSHeader=true"
+      - "traefik.http.middlewares.force-STS-Header.headers.stsSeconds=31536000"
+      - "traefik.http.routers.cm-secure.entrypoints=websecure"
+      - "traefik.http.routers.cm-secure.rule=Host(`${API_HOST}`)"
+      - "traefik.http.routers.cm-secure.tls=true"
+      - "traefik.http.routers.cm-secure.middlewares=force-STS-Header"
+networks:
+  headstart:
+    external:
+      name: nat
